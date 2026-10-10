@@ -103,3 +103,104 @@ def extrair_cnaes(html: str, cnpj_esperado: str | None = None) -> dict:
         raise ErroConsulta("Esperado exatamente um CNAE principal.")
     secundarios = _atividades(_valores(soup, SECUNDARIOS), permitir_vazio=True)
     return {"cnae_principal": principal[0], "cnaes_secundarios": secundarios}
+
+
+def _aguardar_comprovante(contexto, pagina, cnpj: str, espera: int) -> dict:
+    from playwright.sync_api import Error as ErroNavegador
+
+    limite = time.monotonic() + espera
+    while time.monotonic() < limite:
+        paginas = [p for p in contexto.pages if not p.is_closed()]
+        if not paginas:
+            raise ErroConsulta("O navegador foi fechado antes de concluir a consulta.")
+        for atual in paginas:
+            for frame in atual.frames:
+                origem = urlparse(frame.url)
+                if (origem.hostname != "solucoes.receita.fazenda.gov.br"
+                        or not origem.path.lower().startswith("/servicos/cnpjreva")):
+                    continue
+                try:
+                    html = frame.content()
+                except ErroNavegador:
+                    continue  # A navegação pode trocar o documento durante a leitura.
+                if "ERRO AO VALIDAR CAPTCHA" in _comparavel(html):
+                    raise ErroConsulta(
+                        "A Receita recusou a validação do CAPTCHA. "
+                        "Para consultar a lista sem CAPTCHA, use: python lote.py"
+                    )
+                if _comparavel(SECUNDARIOS) in _comparavel(html):
+                    return extrair_cnaes(html, cnpj)
+        paginas[0].wait_for_timeout(500)
+    raise ErroConsulta(
+        "Tempo esgotado. Conclua o CAPTCHA e clique em CONSULTAR no navegador. "
+        "Se a Receita mostrar um erro, corrija-o antes de repetir a consulta."
+    )
+
+
+def consultar_receita(cnpj: str, espera: int = 180) -> dict:
+    from playwright.sync_api import Error as ErroNavegador, sync_playwright
+
+    cnpj = normalizar_cnpj(cnpj)
+    try:
+        with sync_playwright() as playwright:
+            with playwright.chromium.launch(headless=False) as navegador:
+                contexto = navegador.new_context(locale="pt-BR")
+                pagina = contexto.new_page()
+                pagina.goto(URL_RECEITA, wait_until="domcontentloaded", timeout=30000)
+                pagina.locator('input[type="text"]:visible').fill(cnpj, timeout=15000)
+                print(
+                    "Na janela da Receita, conclua o CAPTCHA e clique em CONSULTAR. "
+                    f"Aguardando por até {espera}s…", file=sys.stderr, flush=True
+                )
+                return _aguardar_comprovante(contexto, pagina, cnpj, espera)
+    except ErroNavegador as erro:
+        if "Executable doesn't exist" in str(erro):
+            raise ErroConsulta(
+                "Chromium não instalado. Execute: python -m playwright install chromium"
+            ) from erro
+        raise ErroConsulta(
+            "Não foi possível concluir a consulta no navegador. "
+            "Verifique a conexão, a disponibilidade da Receita e tente novamente."
+        ) from erro
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("cnpj", nargs="?", help="CNPJ numérico ou alfanumérico")
+    parser.add_argument("--html", type=Path, help="Extrair de comprovante HTML já salvo")
+    parser.add_argument("--saida", type=Path, help="Criar arquivo JSON sem sobrescrever")
+    parser.add_argument("--espera", type=int, default=180, help="Espera do CAPTCHA em segundos")
+    args = parser.parse_args(argv)
+    if not args.cnpj and not args.html:
+        parser.error("informe o CNPJ ou use --html com um comprovante salvo")
+    if args.espera <= 0:
+        parser.error("--espera deve ser maior que zero")
+    try:
+        cnpj = normalizar_cnpj(args.cnpj) if args.cnpj else None
+        if args.html:
+            bruto = args.html.read_bytes()
+            try:
+                html = bruto.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                html = bruto.decode("cp1252")
+            resultado = extrair_cnaes(html, cnpj)
+        else:
+            resultado = consultar_receita(cnpj, args.espera)
+        saida = json.dumps(resultado, ensure_ascii=False, indent=2) + "\n"
+        if args.saida:
+            with args.saida.open("x", encoding="utf-8") as arquivo:
+                arquivo.write(saida)
+            print(f"JSON salvo em {args.saida}", file=sys.stderr)
+        else:
+            print(saida, end="")
+        return 0
+    except (ErroConsulta, OSError, UnicodeError, ImportError) as erro:
+        print(f"Erro: {erro}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("Consulta cancelada.", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
