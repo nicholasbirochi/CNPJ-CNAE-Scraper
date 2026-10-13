@@ -22,5 +22,3 @@ output.xlsx
 *.sqlite3-*
 *.log
 *.pid
-
-.ai/
