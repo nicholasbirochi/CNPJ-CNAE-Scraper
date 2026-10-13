@@ -1,5 +1,7 @@
 # CNPJ CNAE Scraper
 
+Ferramentas em Python para consultar os CNAEs de empresas e organizar o resultado em Excel. Há caminhos separados para comprovantes da Receita, consultas em lote pela BrasilAPI e arquivos de Dados Abertos; as instruções abaixo mostram quando usar cada um.
+
 ## Lote de CNPJs e output.xlsx
 
 Coloque os arquivos **XLSX, CSV, TSV ou TXT** em `data/` e execute, após instalar as dependências:
@@ -140,3 +142,7 @@ Fontes oficiais verificadas em 13/10/2026:
 - [Emissão do comprovante — Receita Federal](https://solucoes.receita.fazenda.gov.br/Servicos/cnpjreva/)
 - [Documentação de cálculo do DV](https://www.gov.br/receitafederal/pt-br/centrais-de-conteudo/publicacoes/documentos-tecnicos/cnpj)
 - [Playwright para Python](https://playwright.dev/python/docs/library)
+
+## Licença
+
+Código e documentação autorais sob [MIT](license).
